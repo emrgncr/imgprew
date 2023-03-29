@@ -209,7 +209,9 @@ Do the resize things
 
 void print_row_square(png_bytep row, int cols, int width, double jamn,
                       int pmult) {
+  // avoid using printf alot
   cols -= cols % 2;
+  char *line = calloc(sizeof(char), (block_size * cols) + 8);
   for (int xx = 0; xx < cols; xx += 2) { // try to handle rectangular pixels
     int x = xx * jamn;
     if (x >= width)
@@ -220,14 +222,18 @@ void print_row_square(png_bytep row, int cols, int width, double jamn,
     int g = (pixel[1] + pixel2[1]) / 2;
     int b = (pixel[2] + pixel2[2]) / 2;
     char *printstr = get_ublock(r, g, b);
-    printf("%s%s", printstr, printstr);
-    printf("\e[0m");
+    strcat(line, printstr);
+    strcat(line, printstr);
     free(printstr);
   }
+  printf("%s\e[0m", line);
+  free(line);
 }
 
 void print_row_flat(png_bytep row, int cols, int width, double jamn,
                     int pmult) {
+  // avoid using printf alot
+  char *line = calloc(sizeof(char), (block_size * cols) + 8);
   for (int xx = 0; xx < cols; xx++) {
     int x = xx * jamn;
     if (x >= width)
@@ -237,10 +243,11 @@ void print_row_flat(png_bytep row, int cols, int width, double jamn,
     int g = pixel[1];
     int b = pixel[2];
     char *printstr = get_ublock(r, g, b);
-    printf("%s", printstr);
-    printf("\e[0m");
+    strcat(line, printstr);
     free(printstr);
   }
+  printf("%s\e[0m", line);
+  free(line);
 }
 
 int show_video(char *filepath, int use_half) {
@@ -306,7 +313,6 @@ int show_video(char *filepath, int use_half) {
     strcpy(temppath, tempdir);
     strcat(temppath, "/");
     strcat(temppath, readf);
-    printf("file: %s\n", temppath);
     if (access(temppath, F_OK) != 0) {
       break;
     }
