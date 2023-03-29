@@ -1,9 +1,13 @@
+#include <dirent.h>
 #include <ncurses.h>
 #include <png.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 #define HEADER_LEN 8
 #define PNG_NO_SETJMP 1
@@ -30,15 +34,22 @@ void print_help(char *arg1) {
          "--help: display this help message\n"
          "--use-half: Use pixels with aspect ratio 1:2\n"
          "--max-cols: Maximum number of columns to print to\n"
-         "--fit-height: Fit the image heightwise as well\n",
+         "--fit-height: Fit the image heightwise as well\n"
+         "--video: Convert a video to a sequence of pngs and display them one "
+         "by one\n",
          arg1, arg1);
 }
+
+int print_png(char *filepath, int use_half, int max_cols, int fit_height);
+
+int show_video(char *filepath, int use_half);
 
 int main(int argc, char *argv[]) {
 
   int use_half = 0;
   int max_cols = -1;
   int fit_height = 0;
+  int video = 0;
 
   if (argc < 2) {
     print_help(argv[0]);
@@ -58,6 +69,10 @@ int main(int argc, char *argv[]) {
       use_half = 1;
       continue;
     }
+    if (strcmp(argv[i], "--video") == 0) {
+      video = 1;
+      continue;
+    }
     if (strcmp(argv[i], "--max-cols") == 0) {
       if (i == argc - 1) {
         print_help(argv[0]);
@@ -74,9 +89,17 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  FILE *fp = fopen(argv[1], "rb");
+  if (video) {
+    show_video(argv[1], use_half);
+  } else {
+    print_png(argv[1], use_half, max_cols, fit_height);
+  }
+}
+
+int print_png(char *filepath, int use_half, int max_cols, int fit_height) {
+  FILE *fp = fopen(filepath, "rb");
   if (!fp) {
-    printf("The file %s does not exists!\n", argv[1]);
+    printf("The file %s does not exists!\n", filepath);
     return EXIT_FAILURE;
   }
 
@@ -218,4 +241,84 @@ void print_row_flat(png_bytep row, int cols, int width, double jamn,
     printf("\e[0m");
     free(printstr);
   }
+}
+
+int show_video(char *filepath, int use_half) {
+
+  char template[] = "/tmp/imgprewtmp.XXXXXX";
+  char *tempdir = mkdtemp(template);
+
+  if (tempdir < 0) {
+    printf("Error creating temporary directory\n");
+    return 1;
+  }
+
+  pid_t proc;
+
+  proc = fork();
+
+  if (proc < 0) {
+    printf("forking failed\n");
+    rmdir(tempdir);
+    return 1;
+  }
+
+  if (proc == 0) {
+    printf("Starting ffmpeg:\n");
+    char temppath[strlen(tempdir) + strlen("out%04d.png") + 5];
+    strcpy(temppath, tempdir);
+    strcat(temppath, "/");
+    strcat(temppath, "out%04d.png");
+    char *args[] = {
+        "ffmpeg",
+        "-i",
+        filepath,
+        "-q:v",
+        "4",
+        "-vf",
+        "scale=360:-1,select=not(mod(n\\,4)),setpts=N/FRAME_RATE/TB",
+        temppath,
+        NULL};
+    int t = execvp("ffmpeg", args);
+    printf("%d\n", t);
+    exit(EXIT_FAILURE);
+  }
+
+  int status;
+  wait(&status); // wait for child to finish
+  printf("ffmpeg completed\n");
+
+  if (status != EXIT_SUCCESS) {
+    printf("ffmpeg child process exited with a failure\n");
+    rmdir(tempdir);
+    return 1;
+  }
+
+  // display frames
+
+  char readf[strlen("out0000.png") + 1];
+  char temppath[strlen(tempdir) + strlen("out%04d.png") + 5];
+  int fileid = 1;
+  while (true) {
+    readf[0] = '\0';
+    temppath[0] = '\0';
+    sprintf(readf, "out%04d.png", fileid);
+    strcpy(temppath, tempdir);
+    strcat(temppath, "/");
+    strcat(temppath, readf);
+    printf("file: %s\n", temppath);
+    if (access(temppath, F_OK) != 0) {
+      break;
+    }
+    print_png(temppath, use_half, -1, 1);
+    // calculate as if it was 24 fps
+    // i aim 6 fps
+    struct timespec towait;
+    towait.tv_nsec = 1e9 / 6;
+    nanosleep(&towait, NULL);
+    fileid++;
+  }
+
+  rmdir(tempdir);
+  return 0;
 }
