@@ -44,6 +44,8 @@ int print_png(char *filepath, int use_half, int max_cols, int fit_height);
 
 int show_video(char *filepath, int use_half);
 
+int print_non_png(char *filepath, int use_half, int max_cols, int fit_height);
+
 int main(int argc, char *argv[]) {
 
   int use_half = 0;
@@ -92,7 +94,11 @@ int main(int argc, char *argv[]) {
   if (video) {
     show_video(argv[1], use_half);
   } else {
-    print_png(argv[1], use_half, max_cols, fit_height);
+    int res = print_png(argv[1], use_half, max_cols, fit_height);
+    if (res == 4) {
+      // not png, try again
+      print_non_png(argv[1], use_half, max_cols, fit_height);
+    }
   }
 }
 
@@ -106,19 +112,22 @@ int print_png(char *filepath, int use_half, int max_cols, int fit_height) {
   unsigned char header[HEADER_LEN];
   if (fread(header, 1, HEADER_LEN, fp) != HEADER_LEN) {
     printf("fread err\n");
+    fclose(fp);
     return EXIT_FAILURE;
   }
   int ispng = !png_sig_cmp(header, 0, 8);
 
   if (!ispng) {
     printf("the file is not a png\n");
-    return EXIT_FAILURE;
+    fclose(fp);
+    return 4;
   }
 
   png_structp structp =
       png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
   if (!structp) {
     printf("cannot create read struct\n");
+    fclose(fp);
     return EXIT_FAILURE;
   }
 
@@ -127,6 +136,7 @@ int print_png(char *filepath, int use_half, int max_cols, int fit_height) {
   if (!infop) {
     png_destroy_read_struct(&structp, NULL, NULL);
     printf("err while reading info\n");
+    fclose(fp);
     return EXIT_FAILURE;
   }
 
@@ -325,6 +335,60 @@ int show_video(char *filepath, int use_half) {
     fileid++;
   }
 
+  rmdir(tempdir);
+  return 0;
+}
+
+int print_non_png(char *filepath, int use_half, int max_cols, int fit_height) {
+  // create a temp directory
+
+  char template[] = "/tmp/imgprewtmp.XXXXXX";
+  char *tempdir = mkdtemp(template);
+
+  if (tempdir < 0) {
+    printf("Error creating temporary directory\n");
+    return 1;
+  }
+
+  char temppath[strlen(tempdir) + strlen("tmp.png") + 5];
+  strcpy(temppath, tempdir);
+  strcat(temppath, "/");
+  strcat(temppath, "tmp.png");
+
+  pid_t proc;
+
+  proc = fork();
+
+  if (proc < 0) {
+    printf("forking failed\n");
+    rmdir(tempdir);
+    return 1;
+  }
+
+  if (proc == 0) {
+    printf("converting:\n");
+    char *args[] = {
+        "convert",
+        filepath,
+        temppath,
+        NULL,
+    };
+    int t = execvp("convert", args);
+    printf("%d\n", t);
+    exit(EXIT_FAILURE);
+  }
+
+  int status;
+  wait(&status); // wait for child to finish
+  printf("convert completed\n");
+
+  if (status != EXIT_SUCCESS) {
+    printf("convert child process exited with a failure\n");
+    rmdir(tempdir);
+    return 1;
+  }
+
+  print_png(temppath, use_half, max_cols, fit_height);
   rmdir(tempdir);
   return 0;
 }
