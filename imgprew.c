@@ -331,6 +331,7 @@ int show_video(char *filepath, int use_half) {
     // i aim 6 fps
     struct timespec towait;
     towait.tv_nsec = 1e9 / 6;
+    towait.tv_sec = 0;
     nanosleep(&towait, NULL);
     fileid++;
   }
